@@ -1,0 +1,14 @@
+strategy: bb_breakout
+symbol: ETHUSDT
+timeframe: 1h
+
+params:
+  bb_period: 20
+  bb_std: 1.5         # tight bands — Variant B (best Sharpe in research)
+  volume_mult: 1.5    # volume confirmation: 1.5x average
+  lookback: 5         # price must have been below mid-band within last N bars
+
+risk:
+  sl: 1.5             # stop loss %
+  tp: 6.0             # take profit %
+  position_size: 0.25 # fraction of capital per trade

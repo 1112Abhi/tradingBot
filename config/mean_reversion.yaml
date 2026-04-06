@@ -1,0 +1,14 @@
+strategy: mean_reversion
+symbol: BTCUSDT
+timeframe: 4h
+
+params:
+  rsi_period: 14
+  rsi_oversold: 35    # BUY when RSI drops below this
+  rsi_exit: 55        # SELL when RSI recovers above this
+  trend_period: 50    # EMA period for trend filter
+
+risk:
+  sl: 1.5             # stop loss %
+  tp: 6.0             # take profit %
+  position_size: 0.25 # fraction of capital per trade

@@ -1,0 +1,16 @@
+strategy: ema_crossover
+symbol: BTCUSDT
+timeframe: 4h
+
+params:
+  fast_period: 12
+  slow_period: 26
+  trend_period: 50
+  rsi_period: 14
+  rsi_buy_min: 0      # RSI filter disabled for live (0–100 = accept all)
+  rsi_buy_max: 100
+
+risk:
+  sl: 1.5             # stop loss %
+  tp: 6.0             # take profit %
+  position_size: 0.25 # fraction of capital per trade
