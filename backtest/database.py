@@ -171,6 +171,7 @@ class Database:
                 "ALTER TABLE backtest_trades  ADD COLUMN gross_pnl       REAL DEFAULT 0.0",
                 "ALTER TABLE backtest_trades  ADD COLUMN fees_paid       REAL DEFAULT 0.0",
                 "ALTER TABLE backtest_trades  ADD COLUMN leverage_used   REAL DEFAULT 1.0",
+                "ALTER TABLE live_trades      ADD COLUMN strategy_mode   TEXT DEFAULT 'portfolio'",
             ]:
                 try:
                     conn.execute(migration)
@@ -481,7 +482,7 @@ class Database:
             trade: Dict with keys: symbol, interval, strategy, trade_type,
                    entry_candle_ts, entry_ts, exit_ts, entry_price, exit_price,
                    position_value, gross_pnl, fees_paid, pnl_dollar, pnl_pct,
-                   exit_reason, leverage_used
+                   exit_reason, leverage_used, strategy_mode (optional, default 'portfolio')
         """
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         with self._connect() as conn:
@@ -491,15 +492,15 @@ class Database:
                     entry_candle_ts, entry_ts, exit_ts,
                     entry_price, exit_price, position_value,
                     gross_pnl, fees_paid, pnl_dollar, pnl_pct,
-                    exit_reason, leverage_used, created_at)
+                    exit_reason, leverage_used, strategy_mode, created_at)
                    VALUES
                    (:symbol, :interval, :strategy, :trade_type,
                     :entry_candle_ts, :entry_ts, :exit_ts,
                     :entry_price, :exit_price, :position_value,
                     :gross_pnl, :fees_paid, :pnl_dollar, :pnl_pct,
-                    :exit_reason, :leverage_used, :created_at)
+                    :exit_reason, :leverage_used, :strategy_mode, :created_at)
                 """,
-                {**trade, "created_at": now},
+                {**trade, "strategy_mode": trade.get("strategy_mode", "portfolio"), "created_at": now},
             )
 
     def get_live_trades(

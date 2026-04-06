@@ -1,6 +1,7 @@
 strategy: bb_breakout
 symbol: ETHUSDT
 timeframe: 1h
+mode: experiment
 
 params:
   bb_period: 20

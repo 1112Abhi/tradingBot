@@ -34,8 +34,11 @@ def load_config(strategy_name: str) -> dict:
     with open(path) as f:
         cfg = yaml.safe_load(f)
 
-    for key in ("strategy", "symbol", "timeframe", "params", "risk"):
+    for key in ("strategy", "symbol", "timeframe", "mode", "params", "risk"):
         if key not in cfg:
             raise ValueError(f"Config '{strategy_name}.yaml' missing required key: '{key}'")
+
+    if cfg["mode"] not in ("portfolio", "experiment"):
+        raise ValueError(f"Config '{strategy_name}.yaml' mode must be 'portfolio' or 'experiment', got '{cfg['mode']}'")
 
     return cfg

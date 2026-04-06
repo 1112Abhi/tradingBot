@@ -31,17 +31,13 @@ class TestPhase76Bug1PollOnceFix(unittest.TestCase):
             "core",
             "candle_watcher.py"
         )
-        
+
         with open(watcher_file, 'r') as f:
             content = f.read()
-        
+
         # Look for the key fix: processable = recent[:-1]
         self.assertIn("processable = recent[:-1]", content,
                      "_poll_once should exclude latest bar: processable = recent[:-1]")
-        
-        # Verify the full logic flow
-        self.assertIn("# Bars we can process = all except the last", content,
-                     "Code should document why last bar is excluded")
 
     def test_poll_once_only_processes_bars_with_next_bar(self):
         """
@@ -53,14 +49,14 @@ class TestPhase76Bug1PollOnceFix(unittest.TestCase):
             "core",
             "candle_watcher.py"
         )
-        
+
         with open(watcher_file, 'r') as f:
             content = f.read()
-        
-        # Check for the key check comment
-        self.assertIn("Key rule: candle T can only be processed when candle T+1 exists in DB",
+
+        # Check that processable excludes the last bar (T+1 requirement)
+        self.assertIn("processable = recent[:-1]",
                      content,
-                     "Code should document the T+1 requirement")
+                     "Code should exclude latest bar so only bars with a next bar are processed")
 
     def test_poll_once_drops_already_processed_bar(self):
         """Verify _poll_once drops the first bar if it equals last_processed."""
@@ -112,7 +108,7 @@ class TestPhase76Bug2CatchUpFirstRunFix(unittest.TestCase):
         self.assertIn("if first_run and last_ts:", content,
                      "_catch_up should mark starting point on first run")
         
-        self.assertIn("self.db.mark_candle_processed(self.symbol, self.interval, last_ts)",
+        self.assertIn("self.db.mark_candle_processed(g.symbol, g.interval, last_ts)",
                      content,
                      "_catch_up should call mark_candle_processed on first run")
 
@@ -129,7 +125,7 @@ class TestPhase76Bug2CatchUpFirstRunFix(unittest.TestCase):
             content = f.read()
         
         # Check for the get_last_timestamp call for first-run case
-        self.assertIn("last_ts = self.db.get_last_timestamp(self.symbol, self.interval)",
+        self.assertIn("last_ts = self.db.get_last_timestamp(g.symbol, g.interval)",
                      content,
                      "_catch_up should get last DB timestamp on first run")
 
@@ -193,25 +189,27 @@ class TestPhase76Bug3MultiIntervalSync(unittest.TestCase):
             content = f.read()
         
         # Check for loader.sync call
-        self.assertIn("self.loader.sync(symbol=self.symbol, interval=interval)",
+        self.assertIn("loader.sync(symbol=symbol, interval=interval)",
                      content,
-                     "_fetch_with_retry should call loader.sync for each interval")
+                     "_fetch_symbol should call loader.sync for each interval")
 
-    def test_fetch_with_retry_returns_strategy_interval_count(self):
-        """Verify _fetch_with_retry returns inserted count for strategy interval."""
+    def test_fetch_symbol_syncs_all_intervals(self):
+        """Verify _fetch_symbol syncs every interval in SYNC_INTERVALS per symbol."""
         watcher_file = os.path.join(
             os.path.dirname(__file__),
             "..",
             "core",
             "candle_watcher.py"
         )
-        
+
         with open(watcher_file, 'r') as f:
             content = f.read()
-        
-        # Check for conditional tracking of strategy interval count
-        self.assertIn("if interval == self.interval:", content,
-                     "_fetch_with_retry should track strategy interval count")
+
+        # _fetch_symbol loops over SYNC_INTERVALS and calls loader.sync for each
+        self.assertIn("def _fetch_symbol(self, symbol: str)", content,
+                     "Should define _fetch_symbol method")
+        self.assertIn("for interval in SYNC_INTERVALS:", content,
+                     "_fetch_symbol should loop through SYNC_INTERVALS")
 
 
 class TestPhase76LoggingConversion(unittest.TestCase):

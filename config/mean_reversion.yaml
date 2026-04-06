@@ -1,6 +1,7 @@
 strategy: mean_reversion
 symbol: BTCUSDT
 timeframe: 4h
+mode: portfolio
 
 params:
   rsi_period: 14

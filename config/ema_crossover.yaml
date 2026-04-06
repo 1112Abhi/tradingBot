@@ -1,6 +1,7 @@
 strategy: ema_crossover
 symbol: BTCUSDT
 timeframe: 4h
+mode: portfolio
 
 params:
   fast_period: 12
