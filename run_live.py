@@ -22,20 +22,27 @@ from core.candle_watcher import CandleWatcher, StrategyGroup
 from strategy.ema_crossover import MACrossoverStrategy
 from strategy.mean_reversion import MeanReversionStrategy
 from strategy.bb_breakout import BBBreakoutStrategy
+from strategy.donchian_breakout import DonchianBreakoutStrategy
 from utils.config_loader import load_config
 
 # ── Strategy configs to load (order determines heartbeat display order) ──────
 STRATEGY_CONFIGS = [
+    # Portfolio strategies (real capital)
     "ema_crossover",
     "mean_reversion",
+    # Experiment strategies (signals only, no capital)
     "bb_breakout_eth_1h",
+    "mean_reversion_eth_4h",
+    "mean_reversion_sol_4h",
+    "donchian_btc_4h",
 ]
 
 # ── Strategy class registry ────────────────────────────────────────────────────
 STRATEGY_CLASSES = {
-    "ema_crossover":  MACrossoverStrategy,
-    "mean_reversion": MeanReversionStrategy,
-    "bb_breakout":    BBBreakoutStrategy,
+    "ema_crossover":     MACrossoverStrategy,
+    "mean_reversion":    MeanReversionStrategy,
+    "bb_breakout":       BBBreakoutStrategy,
+    "donchian_breakout": DonchianBreakoutStrategy,
 }
 
 

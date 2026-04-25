@@ -1,0 +1,18 @@
+strategy: mean_reversion
+symbol: SOLUSDT
+timeframe: 4h
+mode: experiment
+
+params:
+  rsi_period: 14
+  rsi_oversold: 35    # BUY when RSI drops below this
+  rsi_exit: 55        # SELL when RSI recovers above this
+  trend_period: 50    # EMA period for trend filter
+
+risk:
+  sl: 1.5             # stop loss %
+  tp: 6.0             # take profit %
+  position_size: 0.25 # fraction of capital (experiment — no real capital used)
+
+# Backtest (3yr SOLUSDT 4h, 25% size):
+#   return=+14.80%  sharpe=0.49  DD=10.53%  win%=31.8  trades=236
