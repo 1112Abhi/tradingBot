@@ -23,6 +23,7 @@ from strategy.ema_crossover import MACrossoverStrategy
 from strategy.mean_reversion import MeanReversionStrategy
 from strategy.bb_breakout import BBBreakoutStrategy
 from strategy.donchian_breakout import DonchianBreakoutStrategy
+from strategy.donchian_regime import DonchianRegimeStrategy
 from utils.config_loader import load_config
 
 # ── Strategy configs to load (order determines heartbeat display order) ──────
@@ -34,7 +35,8 @@ STRATEGY_CONFIGS = [
     "bb_breakout_eth_1h",
     "mean_reversion_eth_4h",
     "mean_reversion_sol_4h",
-    "donchian_btc_4h",
+    "donchian_btc_4h",          # unfiltered — baseline comparison
+    "donchian_regime_btc_4h",   # regime-filtered — research candidate
 ]
 
 # ── Strategy class registry ────────────────────────────────────────────────────
@@ -43,6 +45,7 @@ STRATEGY_CLASSES = {
     "mean_reversion":    MeanReversionStrategy,
     "bb_breakout":       BBBreakoutStrategy,
     "donchian_breakout": DonchianBreakoutStrategy,
+    "donchian_regime":   DonchianRegimeStrategy,
 }
 
 
