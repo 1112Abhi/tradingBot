@@ -366,6 +366,26 @@ class Database:
         with self._connect() as conn:
             conn.execute(sql, row)
 
+    def get_latest_backtest_run(self, symbol: str, interval: str, strategy: str) -> Optional[dict]:
+        """Return the most recent backtest run for a given symbol/interval/strategy."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT * FROM backtest_runs
+                   WHERE symbol=? AND interval=? AND strategy=?
+                   ORDER BY created_at DESC LIMIT 1""",
+                [symbol, interval, strategy],
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_all_live_strategy_keys(self) -> List[dict]:
+        """Return distinct (symbol, interval, strategy, strategy_mode) from live_trades."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT DISTINCT symbol, interval, strategy, strategy_mode
+                   FROM live_trades ORDER BY strategy_mode, symbol, strategy"""
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def get_run(self, run_id: str) -> Optional[dict]:
         """
         Retrieve a backtest run summary by run_id.
