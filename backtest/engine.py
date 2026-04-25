@@ -21,6 +21,7 @@ def run_backtest(
     strategies: Optional[List[BaseStrategy]] = None,
     sl_pct: Optional[float] = None,
     tp_pct: Optional[float] = None,
+    position_size: Optional[float] = None,  # fixed capital fraction per trade (e.g. 0.25)
 ) -> List[str]:
     """
     Run a backtest against stored historical data.
@@ -30,17 +31,19 @@ def run_backtest(
     Open positions at end-of-data are force-closed at the last bar.
 
     Args:
-        symbol:     Binance pair stored in DB (e.g. "BTCUSDT").
-        interval:   Candle interval (e.g. "1h").
-        mode:       "per" = per-strategy only, "agg" = aggregated only,
-                    "both" = run both and store as separate DB runs.
-        db:         Optional Database instance (created if not provided).
-        strategies: Optional pre-configured strategy list. If None, loads
-                    from config via get_strategies() (normal operation).
-        sl_pct:     Stop-loss fraction override (e.g. 0.015). Falls back to
-                    config.BACKTEST_STOP_LOSS_PCT when None.
-        tp_pct:     Take-profit fraction override (e.g. 0.06). Falls back to
-                    config.BACKTEST_TAKE_PROFIT_PCT when None.
+        symbol:        Binance pair stored in DB (e.g. "BTCUSDT").
+        interval:      Candle interval (e.g. "1h").
+        mode:          "per" = per-strategy only, "agg" = aggregated only,
+                       "both" = run both and store as separate DB runs.
+        db:            Optional Database instance (created if not provided).
+        strategies:    Optional pre-configured strategy list. If None, loads
+                       from config via get_strategies() (normal operation).
+        sl_pct:        Stop-loss fraction override (e.g. 0.015). Falls back to
+                       config.BACKTEST_STOP_LOSS_PCT when None.
+        tp_pct:        Take-profit fraction override (e.g. 0.06). Falls back to
+                       config.BACKTEST_TAKE_PROFIT_PCT when None.
+        position_size: Fixed capital fraction per trade (e.g. 0.25 = 25%).
+                       Falls back to config.PORTFOLIO_PER_STRATEGY_FRACTION when None.
 
     Returns:
         List of run_ids stored in the DB (one per mode).
@@ -60,28 +63,30 @@ def run_backtest(
     if mode in ("per", "both"):
         for strategy in strategies:
             run_id = _run_single(
-                bars       = bars,
-                strategies = [strategy],
-                aggregated = False,
-                symbol     = symbol,
-                interval   = interval,
-                db         = db,
-                sl_pct     = sl_pct,
-                tp_pct     = tp_pct,
+                bars          = bars,
+                strategies    = [strategy],
+                aggregated    = False,
+                symbol        = symbol,
+                interval      = interval,
+                db            = db,
+                sl_pct        = sl_pct,
+                tp_pct        = tp_pct,
+                position_size = position_size,
             )
             run_ids.append(run_id)
             _print_summary(db, run_id)
 
     if mode in ("agg", "both"):
         run_id = _run_single(
-            bars       = bars,
-            strategies = strategies,
-            aggregated = True,
-            symbol     = symbol,
-            interval   = interval,
-            db         = db,
-            sl_pct     = sl_pct,
-            tp_pct     = tp_pct,
+            bars          = bars,
+            strategies    = strategies,
+            aggregated    = True,
+            symbol        = symbol,
+            interval      = interval,
+            db            = db,
+            sl_pct        = sl_pct,
+            tp_pct        = tp_pct,
+            position_size = position_size,
         )
         run_ids.append(run_id)
         _print_summary(db, run_id)
@@ -102,6 +107,7 @@ def _run_single(
     db: Database,
     sl_pct: Optional[float] = None,
     tp_pct: Optional[float] = None,
+    position_size: Optional[float] = None,
 ) -> str:
     """
     Simulate one backtest run (either per-strategy or aggregated).
@@ -118,14 +124,15 @@ def _run_single(
     entry_price          = None
     entry_ts             = None
     entry_bar            = None
-    entry_position_value = None   # locked at entry via ATR risk sizing
+    entry_position_value = None   # locked at entry via fixed fraction sizing
     trade_num            = 0
     trades: List[dict]   = []
 
     # Exit parameters: caller overrides take priority over config
-    STOP_LOSS_PCT   = sl_pct if sl_pct is not None else config.BACKTEST_STOP_LOSS_PCT
-    TAKE_PROFIT_PCT = tp_pct if tp_pct is not None else config.BACKTEST_TAKE_PROFIT_PCT
-    MAX_HOLD_BARS   = 100     # Exit if no SL/TP hit after 100 bars
+    STOP_LOSS_PCT    = sl_pct if sl_pct is not None else config.BACKTEST_STOP_LOSS_PCT
+    TAKE_PROFIT_PCT  = tp_pct if tp_pct is not None else config.BACKTEST_TAKE_PROFIT_PCT
+    MAX_HOLD_BARS    = 100     # Exit if no SL/TP hit after 100 bars
+    POSITION_SIZE    = position_size if position_size is not None else config.PORTFOLIO_PER_STRATEGY_FRACTION
 
     strategy_label = (
         config.AGGREGATION_METHOD if aggregated
@@ -153,24 +160,13 @@ def _run_single(
 
         # ── State machine ──────────────────────────────────────────────
         if signal == config.SIGNAL_BUY and position == "NONE":
-            prices = market_data["prices"]
-            try:
-                atr = compute_atr(prices, config.ATR_PERIOD)
-            except ValueError:
-                atr = exec_price * config.ATR_REFERENCE_PCT  # fallback: 1% of price
-
             # Apply buy slippage: we pay slightly more than mid price
             slipped_entry        = exec_price * (1 + config.SLIPPAGE_RATE)
             position             = "LONG"
             entry_price          = slipped_entry
             entry_ts             = exec_ts
             entry_bar            = t
-            entry_position_value = compute_position_size(
-                capital  = capital,
-                atr      = atr,
-                price    = exec_price,
-                sl_pct   = STOP_LOSS_PCT,
-            )
+            entry_position_value = capital * POSITION_SIZE
 
         elif position == "LONG":
             # V4: ONLY mechanical stops - NO EMA exit signal

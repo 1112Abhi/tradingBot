@@ -70,11 +70,12 @@ def build_groups() -> list:
     for config_name in STRATEGY_CONFIGS:
         cfg = load_config(config_name)
 
-        symbol   = cfg["symbol"]
-        interval = cfg["timeframe"]
-        mode     = cfg["mode"]
-        sl_pct   = cfg["risk"]["sl"] / 100
-        tp_pct   = cfg["risk"]["tp"] / 100
+        symbol        = cfg["symbol"]
+        interval      = cfg["timeframe"]
+        mode          = cfg["mode"]
+        sl_pct        = cfg["risk"]["sl"] / 100
+        tp_pct        = cfg["risk"]["tp"] / 100
+        position_size = cfg["risk"].get("position_size", 0.25)
 
         strategy_type = cfg["strategy"]
         if strategy_type not in STRATEGY_CLASSES:
@@ -85,23 +86,26 @@ def build_groups() -> list:
 
         if key not in group_map:
             group_map[key] = {
-                "symbol":     symbol,
-                "interval":   interval,
-                "mode":       mode,
-                "strategies": [],
-                "sl_pct":     sl_pct,
-                "tp_pct":     tp_pct,
+                "symbol":         symbol,
+                "interval":       interval,
+                "mode":           mode,
+                "strategies":     [],
+                "sl_pct":         sl_pct,
+                "tp_pct":         tp_pct,
+                "position_sizes": {},
             }
         group_map[key]["strategies"].append(strategy)
+        group_map[key]["position_sizes"][strategy.name] = position_size
 
     groups = [
         StrategyGroup(
-            symbol     = v["symbol"],
-            interval   = v["interval"],
-            mode       = v["mode"],
-            strategies = v["strategies"],
-            sl_pct     = v["sl_pct"],
-            tp_pct     = v["tp_pct"],
+            symbol         = v["symbol"],
+            interval       = v["interval"],
+            mode           = v["mode"],
+            strategies     = v["strategies"],
+            sl_pct         = v["sl_pct"],
+            tp_pct         = v["tp_pct"],
+            position_sizes = v["position_sizes"],
         )
         for v in group_map.values()
     ]

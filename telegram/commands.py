@@ -1,107 +1,164 @@
-# telegram_commands.py - Telegram Bot Command Handlers
+# telegram/commands.py - Telegram Command Handlers
+#
+# Commands (slash or plain text):
+#   /summary   — open positions + unrealized P&L + capital deployed
+#   /trades    — same as summary (alias)
+#   /history   — last 10 completed trades
+#   /price     — live BTC + ETH price
+#   /help      — command list
+#
+# Natural language aliases also supported (e.g. "give me summary", "active trades")
 
-import subprocess
+import logging
+import requests
 from typing import Optional
 
 import config
-from core.data_fetch import fetch_price
-from logger import get_recent_logs
-from core.state import get_state
 
 
-def handle_command(text: str) -> str:
-    """
-    Parse and execute a Telegram command.
+# ── Live price fetch ───────────────────────────────────────────────────────────
 
-    Args:
-        text: Message text from user (e.g., "/status", "/price bitcoin")
-
-    Returns:
-        Response message to send back to user.
-    """
-    parts = text.strip().split()
-    command = parts[0].lower()
-
-    if command == "/status":
-        return cmd_status()
-    elif command == "/price":
-        symbol = parts[1].lower() if len(parts) > 1 else config.SYMBOL
-        return cmd_price(symbol)
-    elif command == "/symbols":
-        return cmd_symbols()
-    elif command == "/test":
-        return cmd_test()
-    elif command == "/logs":
-        days = int(parts[1]) if len(parts) > 1 else 1
-        return cmd_logs(days)
-    elif command == "/help":
-        return cmd_help()
-    else:
-        return "❓ Unknown command. Type /help for available commands."
-
-
-def cmd_status() -> str:
-    """Show current status: last signal and price."""
-    state = get_state()
-    signal = state.get("last_signal") or "UNKNOWN"
-    price = state.get("last_price") or "N/A"
-
-    return f"📊 Status:\n• Signal: {signal}\n• Price: ${price:,.2f}" if isinstance(price, (int, float)) else f"📊 Status:\n• Signal: {signal}\n• Price: {price}"
-
-
-def cmd_price(symbol: str) -> str:
-    """Fetch and return current price for a symbol."""
-    if symbol not in config.AVAILABLE_SYMBOLS:
-        return f"❌ Symbol '{symbol}' not available.\nAvailable: {', '.join(config.AVAILABLE_SYMBOLS)}"
-
+def _fetch_live_price(symbol: str) -> Optional[float]:
+    """Fetch current mid price from Binance REST API."""
     try:
-        price = fetch_price(symbol=symbol, source=config.DATA_SOURCE)
-        return f"💰 {symbol.upper()}: ${price:,.2f}"
-    except Exception as e:
-        return f"❌ Error fetching price: {str(e)}"
+        resp = requests.get(
+            "https://api.binance.com/api/v3/ticker/price",
+            params={"symbol": symbol},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        return float(resp.json()["price"])
+    except Exception as exc:
+        logging.warning(f"[COMMANDS] price fetch failed for {symbol}: {exc}")
+        return None
 
 
-def cmd_symbols() -> str:
-    """List available symbols."""
-    symbols = ", ".join(config.AVAILABLE_SYMBOLS)
-    return f"📍 Available symbols:\n{symbols}"
+# ── Command handlers ───────────────────────────────────────────────────────────
+
+def cmd_summary(db) -> str:
+    """Open positions with unrealized P&L and capital usage."""
+    positions = db.get_all_open_positions()
+
+    if not positions:
+        return "📭 No open positions."
+
+    lines = ["📊 Open Positions\n"]
+    total_unrealized = 0.0
+    total_deployed   = 0.0
+    capital          = config.BACKTEST_CAPITAL
+
+    # Fetch live prices once per unique symbol
+    symbols = {p["symbol"] for p in positions}
+    prices  = {s: _fetch_live_price(s) for s in symbols}
+
+    for p in positions:
+        live_price  = prices.get(p["symbol"])
+        entry_price = p["entry_price"]
+        pos_value   = p["position_value"]
+
+        if live_price and entry_price:
+            pnl_pct    = (live_price - entry_price) / entry_price * 100
+            pnl_dollar = pos_value * (live_price - entry_price) / entry_price
+            total_unrealized += pnl_dollar
+            price_str  = f"${live_price:,.2f}"
+            pnl_str    = f"${pnl_dollar:+.2f} ({pnl_pct:+.2f}%)"
+        else:
+            price_str = "N/A"
+            pnl_str   = "N/A"
+
+        total_deployed += pos_value
+
+        lines.append(
+            f"• {p['strategy']} | {p['symbol']} {p['interval']}\n"
+            f"  Entry: ${entry_price:,.2f}  Live: {price_str}\n"
+            f"  Size: ${pos_value:,.0f} ({pos_value / capital * 100:.0f}%)\n"
+            f"  Unrealized P&L: {pnl_str}\n"
+            f"  SL: ${p['sl_price']:,.2f}  TP: ${p['tp_price']:,.2f}"
+        )
+
+    lines.append(
+        f"\n💼 Deployed: ${total_deployed:,.0f} ({total_deployed / capital * 100:.0f}% of capital)"
+        f"\n📈 Total Unrealized: ${total_unrealized:+,.2f}"
+    )
+    return "\n".join(lines)
 
 
-def cmd_test() -> str:
-    """Run quick pipeline test."""
-    try:
-        # Test: fetch price
-        price = fetch_price(symbol=config.SYMBOL, source=config.DATA_SOURCE)
-        
-        # Test: generate signal using current EMA strategy
-        from strategy.ema_crossover import MACrossoverStrategy
-        signal = "OK (strategy loaded)"
-        
-        # Test: state
-        state = get_state()
-        
-        return f"✅ Pipeline OK:\n• Price: ${price:,.2f}\n• Signal: {signal}\n• State: Valid"
-    except Exception as e:
-        return f"❌ Pipeline Error: {str(e)}"
+def cmd_history(db, limit: int = 10) -> str:
+    """Last N completed trades across all strategies."""
+    trades = db.get_recent_live_trades(limit=limit)
+
+    if not trades:
+        return "📭 No completed trades yet."
+
+    lines = [f"📋 Last {len(trades)} Trades\n"]
+    total_pnl = 0.0
+
+    for t in trades:
+        emoji      = "✅" if t["pnl_dollar"] >= 0 else "❌"
+        reason_map = {"take_profit": "TP", "stop_loss": "SL", "timeout": "TOut"}
+        reason     = reason_map.get(t["exit_reason"], t["exit_reason"])
+        mode_tag   = "[EXP]" if t.get("strategy_mode") == "experiment" else ""
+        total_pnl += t["pnl_dollar"]
+
+        lines.append(
+            f"{emoji} {t['strategy']} {mode_tag} | {t['symbol']} {t['interval']}\n"
+            f"  {t['entry_ts'][:10]} -> {t['exit_ts'][:10]}  ({reason})\n"
+            f"  Entry: ${t['entry_price']:,.2f}  Exit: ${t['exit_price']:,.2f}\n"
+            f"  P&L: ${t['pnl_dollar']:+.2f} ({t['pnl_pct']:+.2f}%)"
+        )
+
+    lines.append(f"\n💰 Total P&L: ${total_pnl:+,.2f}")
+    return "\n".join(lines)
 
 
-def cmd_logs(days: int = 1) -> str:
-    """Show recent activity logs."""
-    logs = get_recent_logs(days=days)
-    
-    if not logs:
-        return f"📋 No logs from last {days} day(s)"
-    
-    log_text = "\n".join(logs[:10])  # Limit to 10 recent entries
-    return f"📋 Recent Activity ({days} day(s)):\n{log_text}"
+def cmd_price() -> str:
+    """Fetch live BTC and ETH price."""
+    results = []
+    for symbol, name in [("BTCUSDT", "BTC"), ("ETHUSDT", "ETH")]:
+        price = _fetch_live_price(symbol)
+        if price:
+            results.append(f"• {name}: ${price:,.2f}")
+        else:
+            results.append(f"• {name}: unavailable")
+    return "💰 Live Prices\n" + "\n".join(results)
 
 
 def cmd_help() -> str:
-    """Show available commands."""
-    return """🤖 Available Commands:
-/status - Show current signal & price
-/price [symbol] - Get price for symbol
-/symbols - List available symbols
-/test - Run pipeline test
-/logs [days] - Show recent activity (default: 1 day)
-/help - Show this message"""
+    return (
+        "🤖 Commands\n\n"
+        "/summary — open positions + unrealized P&L\n"
+        "/history — last 10 completed trades\n"
+        "/price   — live BTC + ETH price\n"
+        "/help    — this message\n\n"
+        "Plain text also works: \"summary\", \"history\", \"price\""
+    )
+
+
+# ── Router ─────────────────────────────────────────────────────────────────────
+
+def handle_command(text: str, db) -> str:
+    """
+    Route a Telegram message to the right command handler.
+    Supports /slash commands and natural language aliases.
+    """
+    t    = text.strip().lower()
+    word = t.lstrip("/").split()[0] if t else ""
+
+    if word in ("summary", "trades", "positions", "active"):
+        return cmd_summary(db)
+    elif word in ("history", "hist", "completed", "closed"):
+        return cmd_history(db)
+    elif word in ("price", "prices"):
+        return cmd_price()
+    elif word in ("help",):
+        return cmd_help()
+
+    # Natural language fallback
+    if any(k in t for k in ("summary", "open trade", "active trade", "position", "unrealized", "pnl")):
+        return cmd_summary(db)
+    if any(k in t for k in ("history", "completed", "past trade", "closed")):
+        return cmd_history(db)
+    if any(k in t for k in ("price", "how much", "btc", "eth")):
+        return cmd_price()
+
+    return "❓ Unknown command. Type /help for available commands."

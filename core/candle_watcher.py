@@ -22,6 +22,7 @@ from backtest.data_loader import DataLoader
 from strategy.base import BaseStrategy, MarketData
 from core.portfolio_state import PortfolioState
 from telegram.bot import send_message
+from telegram.listener import BotListener
 from utils.config_loader import load_config
 
 POLL_INTERVAL_SECS = 300   # 5 min
@@ -42,12 +43,13 @@ class StrategyGroup:
     mode="portfolio"  → uses capital, PortfolioState enforced, [LIVE] tag
     mode="experiment" → no capital, signals observed only,    [EXPERIMENT] tag
     """
-    symbol:     str
-    interval:   str
-    mode:       str                        # "portfolio" | "experiment"
-    strategies: List[BaseStrategy]
-    sl_pct:     float
-    tp_pct:     float
+    symbol:         str
+    interval:       str
+    mode:           str                        # "portfolio" | "experiment"
+    strategies:     List[BaseStrategy]
+    sl_pct:         float
+    tp_pct:         float
+    position_sizes: Dict[str, float] = field(default_factory=dict)  # strategy.name → capital fraction
 
     @property
     def tag(self) -> str:
@@ -109,6 +111,8 @@ class CandleWatcher:
         self._restore_positions()
         self._catch_up()
         self._send_heartbeat()
+
+        BotListener(db=self.db).start()
 
         try:
             while True:
@@ -296,9 +300,10 @@ class CandleWatcher:
         exec_price: float,
         trade_type: str,
     ) -> None:
-        entry_price = exec_price * (1 + config.SLIPPAGE_RATE)
-        capital     = config.BACKTEST_CAPITAL
-        pos_value   = capital * config.PORTFOLIO_PER_STRATEGY_FRACTION
+        entry_price   = exec_price * (1 + config.SLIPPAGE_RATE)
+        capital       = config.BACKTEST_CAPITAL
+        size_fraction = g.position_sizes.get(strategy.name, config.PORTFOLIO_PER_STRATEGY_FRACTION)
+        pos_value     = capital * size_fraction
 
         if g.mode == "portfolio":
             allowed, reason = self.portfolio.can_enter(g.symbol, g.interval, strategy.name, pos_value)

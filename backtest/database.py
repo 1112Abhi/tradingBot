@@ -503,6 +503,24 @@ class Database:
                 {**trade, "strategy_mode": trade.get("strategy_mode", "portfolio"), "created_at": now},
             )
 
+    def get_all_open_positions(self) -> List[dict]:
+        """Return all open positions across all symbols and strategies."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM live_position WHERE status='OPEN' ORDER BY entry_ts ASC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_recent_live_trades(self, limit: int = 10) -> List[dict]:
+        """Return the most recent completed live trades across all symbols/strategies."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM live_trades
+                   ORDER BY exit_ts DESC LIMIT ?""",
+                [limit],
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def get_live_trades(
         self,
         symbol: str,

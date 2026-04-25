@@ -1,92 +1,92 @@
-# bot_listener.py - Telegram Bot Message Listener
+# telegram/listener.py - Telegram Command Listener (daemon thread)
+#
+# Runs as a background thread inside CandleWatcher.run().
+# Polls Telegram for incoming messages and routes them to command handlers.
+# Read-only access to DB — no writes, no contention with the watcher.
 
+import logging
+import threading
 import time
-from typing import Optional
 
 import requests
 
 import config
-from telegram.bot import send_message
 from telegram.commands import handle_command
 
 
 class BotListener:
-    """Poll Telegram API for messages and handle commands."""
+    """
+    Polls Telegram getUpdates API and dispatches commands.
+    Designed to run as a daemon thread alongside CandleWatcher.
+    """
 
-    def __init__(self):
-        self.offset = 0
-        self.api_url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/getUpdates"
+    def __init__(self, db) -> None:
+        self.db      = db
+        self.offset  = 0
+        self._stop   = threading.Event()
 
-    def get_updates(self) -> list:
-        """Fetch new messages from Telegram API."""
-        try:
-            params = {
-                "offset": self.offset,
-                "timeout": config.POLLING_TIMEOUT,
-                "allowed_updates": ["message"],
-            }
-            response = requests.get(self.api_url, params=params, timeout=config.POLLING_TIMEOUT + 5)
-            response.raise_for_status()
-            return response.json().get("result", [])
-        except requests.exceptions.RequestException as e:
-            print(f"[LISTENER] API Error: {e}")
-            return []
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-    def process_update(self, update: dict) -> None:
-        """Handle a single message update."""
+    def start(self) -> threading.Thread:
+        """Start the listener as a background daemon thread. Returns the thread."""
+        t = threading.Thread(target=self._loop, name="TelegramListener", daemon=True)
+        t.start()
+        logging.info("[LISTENER] Telegram command listener started")
+        return t
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    # ------------------------------------------------------------------
+    # Internal loop
+    # ------------------------------------------------------------------
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                updates = self._get_updates()
+                for update in updates:
+                    self.offset = update.get("update_id", 0) + 1
+                    self._process(update)
+            except Exception as exc:
+                logging.warning(f"[LISTENER] Error in polling loop: {exc}")
+            time.sleep(config.POLLING_INTERVAL)
+
+    def _get_updates(self) -> list:
+        resp = requests.get(
+            f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/getUpdates",
+            params={"offset": self.offset, "timeout": 10, "allowed_updates": ["message"]},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json().get("result", [])
+
+    def _process(self, update: dict) -> None:
         message = update.get("message", {})
-        text = message.get("text", "")
+        text    = message.get("text", "").strip()
         chat_id = message.get("chat", {}).get("id")
 
         if not text or not chat_id:
             return
 
-        print(f"[LISTENER] Received: {text}")
+        logging.info(f"[LISTENER] Received: {text!r}")
 
-        # Handle command
-        response = handle_command(text)
-        
-        # Send response back
-        self.send_response(chat_id, response)
-
-    def send_response(self, chat_id: str, text: str) -> None:
-        """Send response message to user."""
-        url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": chat_id,
-            "text": text,
-        }
         try:
-            response = requests.post(url, json=payload, timeout=5)
-            if response.status_code == 200:
-                print(f"[LISTENER] Response sent ✅")
-            else:
-                print(f"[LISTENER] Response failed: {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            print(f"[LISTENER] Send Error: {e}")
+            reply = handle_command(text, self.db)
+        except Exception as exc:
+            logging.warning(f"[LISTENER] Command error: {exc}")
+            reply = "⚠️ Something went wrong processing your command."
 
-    def run(self) -> None:
-        """Start polling for messages (blocking)."""
-        print("[LISTENER] Bot listener started. Waiting for messages...")
-        
+        self._send(chat_id, reply)
+
+    def _send(self, chat_id: int, text: str) -> None:
         try:
-            while True:
-                updates = self.get_updates()
-                
-                for update in updates:
-                    self.offset = update.get("update_id", 0) + 1
-                    self.process_update(update)
-                
-                time.sleep(config.POLLING_INTERVAL)
-        except KeyboardInterrupt:
-            print("\n[LISTENER] Bot stopped.")
-
-
-def main():
-    """Entry point for bot listener."""
-    listener = BotListener()
-    listener.run()
-
-
-if __name__ == "__main__":
-    main()
+            requests.post(
+                f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={"chat_id": chat_id, "text": text},
+                timeout=5,
+            )
+        except Exception as exc:
+            logging.warning(f"[LISTENER] Failed to send reply: {exc}")
