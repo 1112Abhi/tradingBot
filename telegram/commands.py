@@ -5,6 +5,7 @@
 #   /trades    — same as summary (alias)
 #   /history   — last 10 completed trades
 #   /price     — live BTC + ETH price
+#   /sentiment — current market sentiment snapshot
 #   /help      — command list
 #
 # Natural language aliases also supported (e.g. "give me summary", "active trades")
@@ -123,14 +124,51 @@ def cmd_price() -> str:
     return "💰 Live Prices\n" + "\n".join(results)
 
 
+def cmd_sentiment() -> str:
+    """Fetch and format current multi-source sentiment snapshot."""
+    try:
+        from sentiment import aggregator
+        result = aggregator.fetch("BTCUSDT")
+
+        comp = result.composite
+        if comp >= 0.4:
+            mood = "Greedy — MR entries skipped"
+        elif comp <= -0.2:
+            mood = "Fearful — MR entries boosted"
+        else:
+            mood = "Neutral"
+
+        lines = [
+            "📡 Market Sentiment\n",
+            f"Composite: {comp:+.2f}  ({mood})\n",
+        ]
+        if result.fg_label:
+            lines.append(f"• Fear & Greed: {result.fg_score}/100 ({result.fg_label})")
+        if result.funding_label:
+            lines.append(f"• Funding Rate: {result.funding * 100:+.4f}% ({result.funding_label})")
+        if result.dvol_label:
+            lines.append(f"• DVOL (BTC Vol Index): {result.dvol:.1f} ({result.dvol_label})")
+        if result.put_call:
+            lines.append(f"• Put/Call OI Ratio: {result.put_call:.2f}")
+        if result.news_label:
+            lines.append(f"• News Sentiment: {result.news_score:+.2f} ({result.news_label})")
+        if result.errors:
+            lines.append(f"\nWarning: {len(result.errors)} source(s) unavailable: {', '.join(result.errors.keys())}")
+
+        return "\n".join(lines)
+    except Exception as exc:
+        return f"Sentiment unavailable: {exc}"
+
+
 def cmd_help() -> str:
     return (
         "🤖 Commands\n\n"
-        "/summary — open positions + unrealized P&L\n"
-        "/history — last 10 completed trades\n"
-        "/price   — live BTC + ETH price\n"
-        "/help    — this message\n\n"
-        "Plain text also works: \"summary\", \"history\", \"price\""
+        "/summary   — open positions + unrealized P&L\n"
+        "/history   — last 10 completed trades\n"
+        "/price     — live BTC + ETH price\n"
+        "/sentiment — market sentiment snapshot\n"
+        "/help      — this message\n\n"
+        "Plain text also works: \"summary\", \"history\", \"price\", \"sentiment\""
     )
 
 
@@ -150,6 +188,8 @@ def handle_command(text: str, db) -> str:
         return cmd_history(db)
     elif word in ("price", "prices"):
         return cmd_price()
+    elif word in ("sentiment", "fear", "greed", "mood"):
+        return cmd_sentiment()
     elif word in ("help",):
         return cmd_help()
 
@@ -160,5 +200,7 @@ def handle_command(text: str, db) -> str:
         return cmd_history(db)
     if any(k in t for k in ("price", "how much", "btc", "eth")):
         return cmd_price()
+    if any(k in t for k in ("sentiment", "fear", "greed", "mood", "market feel")):
+        return cmd_sentiment()
 
     return "❓ Unknown command. Type /help for available commands."
